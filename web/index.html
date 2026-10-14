@@ -30,6 +30,7 @@
         <div class="group">Image</div>
         <button data-tab="ocr">Read image (OCR)</button>
         <div class="group">Kit</div>
+        <button data-tab="models">Models</button>
         <button data-tab="saved">Saved transcripts</button>
         <button data-tab="settings">Settings</button>
     </nav>
@@ -43,6 +44,7 @@
             <p class="hint">Record or upload up to 10 minutes. Long recordings are split at pauses. Pick <b>Auto-detect</b> to identify the spoken language first.</p>
             <div class="row">
                 <label>Language <select id="asrLang" data-langs="auto"></select></label>
+                <label>Model <select id="asrModel" data-model="asr" data-src="asrLang"></select></label>
             </div>
             <div class="audio-input" id="asrAudio"></div>
             <div class="row"><button id="asrRun" class="primary">Transcribe</button></div>
@@ -64,6 +66,7 @@
             <h1>Text → Speech</h1>
             <div class="row">
                 <label>Language <select id="ttsLang" data-langs></select></label>
+                <label>Model <select id="ttsModel" data-model="tts" data-src="ttsLang"></select></label>
                 <label>Voice <select id="ttsGender"><option value="female">Female</option><option value="male">Male</option></select></label>
             </div>
             <textarea id="ttsText" rows="5">नमस्ते दीदी, आपकी समूह बैठक का विवरण तैयार है।</textarea>
@@ -82,6 +85,11 @@
                 <label>Spoken <select id="voiceSrc" data-langs></select></label>
                 <label>Into <select id="voiceTgt" data-langs data-default="en"></select></label>
                 <label class="check"><input type="checkbox" id="voiceSpeak" checked> speak the translation</label>
+            </div>
+            <div class="row">
+                <label>ASR model <select id="voiceAsrModel" data-model="asr" data-src="voiceSrc"></select></label>
+                <label>Translation model <select id="voiceNmtModel" data-model="translation" data-src="voiceSrc" data-tgt="voiceTgt"></select></label>
+                <label>TTS model <select id="voiceTtsModel" data-model="tts" data-src="voiceTgt"></select></label>
             </div>
             <div class="audio-input" id="voiceAudio"></div>
             <div class="row"><button id="voiceRun" class="primary">Translate speech</button></div>
@@ -107,6 +115,7 @@
                 <label>From <select id="trSrc" data-langs data-default="en"></select></label>
                 <button id="trSwap" title="Swap languages">⇄</button>
                 <label>To <select id="trTgt" data-langs></select></label>
+                <label>Model <select id="trModel" data-model="translation" data-src="trSrc" data-tgt="trTgt"></select></label>
             </div>
             <textarea id="trIn" rows="4">Your loan instalment of 500 rupees is due on Friday.</textarea>
             <div class="row"><button id="trRun" class="primary">Translate</button><button id="trSpeak">🔊 Speak result</button></div>
@@ -120,6 +129,7 @@
             <div class="row">
                 <label>From <select id="xlSrc" data-langs data-default="en"></select></label>
                 <label>To <select id="xlTgt" data-langs></select></label>
+                <label>Model <select id="xlModel" data-model="transliteration" data-src="xlSrc" data-tgt="xlTgt"></select></label>
             </div>
             <input id="xlIn" value="mera naam sunita devi hai" class="wide">
             <div class="row"><button id="xlRun" class="primary">Transliterate sentence</button><button id="xlWord">Suggestions for last word</button></div>
@@ -131,10 +141,12 @@
         <section data-panel="detect">
             <h1>Detect language</h1>
             <h2>From text</h2>
+            <div class="row"><label>Model <select id="tldModel" data-model="txt-lang-detection"></select></label></div>
             <input id="tldIn" value="ನಮಸ್ಕಾರ, ನಿಮ್ಮ ಹೆಸರು ಏನು?" class="wide">
             <div class="row"><button id="tldRun" class="primary">Detect</button></div>
             <div class="out"><div id="tldOut"></div></div>
             <h2>From speech</h2>
+            <div class="row"><label>Model <select id="aldModel" data-model="audio-lang-detection"></select></label></div>
             <div class="audio-input" id="aldAudio"></div>
             <div class="row"><button id="aldRun" class="primary">Detect spoken language</button></div>
             <div class="out"><div id="aldOut"></div></div>
@@ -143,8 +155,9 @@
         <!-- NER -->
         <section data-panel="ner">
             <h1>Names &amp; places</h1>
-            <p class="hint">Finds people, places and organisations in Indic-language text (English isn't supported by this model). Useful for pulling member names out of meeting notes.</p>
-            <div class="row"><label>Language <select id="nerLang" data-langs data-exclude="en"></select></label></div>
+            <p class="hint">Finds people, places and organisations. English works with the AU-KBC model (picked automatically). Useful for pulling member names out of meeting notes.</p>
+            <div class="row"><label>Language <select id="nerLang" data-langs></select></label>
+                <label>Model <select id="nerModel" data-model="ner" data-src="nerLang"></select></label></div>
             <textarea id="nerIn" rows="3">सुनीता देवी और रीना कुमारी ने पटना में जीविका समूह की बैठक में भाग लिया।</textarea>
             <div class="row"><button id="nerRun" class="primary">Find entities</button></div>
             <div class="out"><div id="nerOut"></div></div>
@@ -156,12 +169,20 @@
             <p class="hint">Printed text from a photo of a register, passbook or notice (PNG/JPEG). Can take 5–15 s.</p>
             <div class="row">
                 <label>Language <select id="ocrLang" data-langs></select></label>
+                <label>Model <select id="ocrModel" data-model="ocr" data-src="ocrLang"></select></label>
                 <label class="file">📷 Choose image <input type="file" id="ocrFile" accept="image/png,image/jpeg"></label>
             </div>
             <input id="ocrUrl" class="wide" placeholder="…or a public https:// image URL">
             <img id="ocrPreview" class="preview hidden" alt="Selected image">
             <div class="row"><button id="ocrRun" class="primary">Read text</button><button id="ocrToTr">Send to Translate</button></div>
             <div class="out"><div id="ocrOut"></div></div>
+        </section>
+
+        <!-- Models -->
+        <section data-panel="models">
+            <h1>Models</h1>
+            <p class="hint">Every Bhashini model this kit can use, from the <a id="modelsSource" href="https://dibd-bhashini.gitbook.io/bhashini-apis/available-models-for-usage" target="_blank" rel="noopener">official list</a>. Pick one in any panel's <b>Model</b> menu; <b>Default</b> uses the model from Settings, or lets Bhashini choose. “⚠” marks models that returned an error when tested on 14 Oct 2026.</p>
+            <div class="table-wrap"><table id="modelsTable"><thead><tr><th>Task</th><th>Model (service ID)</th><th>Provider</th><th>Languages</th></tr></thead><tbody></tbody></table></div>
         </section>
 
         <!-- Saved -->

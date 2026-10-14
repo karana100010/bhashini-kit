@@ -7,7 +7,7 @@
 // Audio goes out as 16 kHz mono 16-bit PCM. A short pause (pauseMs) finalises the current
 // utterance, so long sessions come back as a list of sentences instead of one growing string.
 
-export function createLiveAsr({ url, language = 'hi', pauseMs = 900, threshold = 0.012, onReady, onPartial, onFinal, onError, onEnd } = {}) {
+export function createLiveAsr({ url, language = 'hi', serviceId, pauseMs = 900, threshold = 0.012, onReady, onPartial, onFinal, onError, onEnd } = {}) {
     const recorded = [];            // Int16Array chunks, kept so the session can be saved as WAV
     let socket = null, context = null, stream = null, node = null, source = null, ended = null;
     let silence = 0, voiced = false;
@@ -18,7 +18,7 @@ export function createLiveAsr({ url, language = 'hi', pauseMs = 900, threshold =
             socket.binaryType = 'arraybuffer';
             let finish;
             ended = new Promise(r => { finish = r; });
-            socket.onopen = () => socket.send(JSON.stringify({ type: 'start', language }));
+            socket.onopen = () => socket.send(JSON.stringify({ type: 'start', language, service_id: serviceId || undefined }));
             socket.onmessage = ({ data }) => {
                 const message = JSON.parse(data);
                 if (message.type === 'ready') { onReady?.(); resolve(); }

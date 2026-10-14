@@ -47,6 +47,7 @@
                 <option value="gu">Gujarati</option><option value="kn">Kannada</option><option value="ml">Malayalam</option>
                 <option value="pa">Punjabi</option><option value="or">Odia</option><option value="as">Assamese</option>
             </select></label>
+            <label>Model <select id="model"><option value="">Default</option></select></label>
             <button id="mic" class="primary">🎤 Start live</button>
             <label class="file">▶ Stream an audio file <input type="file" id="file" accept="audio/*"></label>
         </div>
@@ -87,7 +88,7 @@
 
     function session() {
         return createLiveAsr({
-            url: wsUrl, language: $('language').value,
+            url: wsUrl, language: $('language').value, serviceId: $('model').value,
             onReady: () => status('Listening… pause briefly between sentences.', { on: true }),
             onPartial: text => { $('partial').textContent = text; },
             onFinal: text => { if (text) { lines.push(text); render(); } $('partial').textContent = ''; },
@@ -145,6 +146,16 @@
         });
         a.click();
     };
+    let asrModels = [];
+    function fillModels() {
+        const lang = $('language').value, previous = $('model').value;
+        const fitting = asrModels.filter(m => m.languages.includes(lang));
+        $('model').replaceChildren(new Option('Default', ''), ...fitting.map(m =>
+            new Option(`${m.ok ? '' : '⚠ '}${m.provider} · ${m.id.replace(/^bhashini\//i, '')}`, m.id)));
+        $('model').value = fitting.some(m => m.id === previous) ? previous : '';
+    }
+    fetch('api/models').then(r => r.json()).then(data => { asrModels = data.models.asr; fillModels(); }).catch(() => {});
+    $('language').onchange = fillModels;
     $('clear').onclick = () => { lines.length = 0; lastWav = null; render(); $('partial').textContent = ''; };
 </script>
 </body>

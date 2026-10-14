@@ -23,7 +23,7 @@ DEFAULTS = {
     'BHASHINI_TLD_SERVICE_ID': '',
     'BHASHINI_ALD_SERVICE_ID': 'bhashini/iitmandi/audio-lang-detection/gpu',
     'BHASHINI_NER_SERVICE_ID': 'bhashini/ai4bharat/indic-ner',
-    'BHASHINI_OCR_SERVICE_ID': '',
+    'BHASHINI_OCR_SERVICE_ID': 'bhashini/bodhan/indic-doc/ocr',
     'BHASHINI_DENOISER_SERVICE_ID': 'bhashini/facebook/denoiser--gpu-t4',
     'BHASHINI_STREAM_URL': 'wss://dhruva-api.bhashini.gov.in',
     'BHASHINI_STREAM_ASR_SERVICE_ID': '',

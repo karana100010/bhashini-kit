@@ -285,6 +285,51 @@ def _():
     api(f"/api/transcripts/{entry['id']}", method='DELETE')
 
 
+@test('models: catalog')
+def _():
+    catalog = api('/api/models', method='GET')
+    counts = {task: len(models) for task, models in catalog['models'].items()}
+    assert counts['asr'] >= 10 and counts['translation'] >= 9 and counts['tts'] >= 7, counts
+    return ', '.join(f'{t} {n}' for t, n in counts.items())
+
+
+@test('models: chosen per request')
+def _():
+    asr = api('/api/bhashini/asr', {'audio_content': TTS['hi'], 'language': 'hi', 'service_id': 'bhashini/bodhan/asr-transcribe-flex'})
+    tr = api('/api/bhashini/translate', {'text': 'Good morning', 'source': 'en', 'target': 'hi', 'service_id': 'bhashini/cdac-noida/nmt'})
+    tts = api('/api/bhashini/tts', {'text': 'नमस्ते', 'language': 'hi', 'service_id': 'Bhashini/IISC/TTS'})
+    ocr = api('/api/bhashini/ocr', {'image_url': OCR_SAMPLE, 'language': 'hi', 'service_id': 'bhashini/iiith-ocr-sceneText-all'})
+    assert asr['text'] and tr['text'] and tts['segments'] and ocr['text']
+    return f"bodhan asr: {asr['text'][:25]}… | cdac nmt: {tr['text']}"
+
+
+@test('models: rejects unknown / unsupported')
+def _():
+    api('/api/bhashini/asr', {'audio_content': TTS['hi'], 'language': 'hi', 'service_id': 'evil/model'}, status=422)
+    api('/api/bhashini/tts', {'text': 'hi', 'language': 'ta', 'service_id': 'ai4bharat/indic-tts-coqui-misc-gpu--t4'}, status=422)
+
+
+@test('models: NER English auto-picks AU-KBC')
+def _():
+    r = api('/api/bhashini/ner', {'text': 'Sunita Devi lives in Patna.', 'language': 'en'})
+    assert r['entities'], r
+    return ', '.join(f"{e['text']}={e['tag']}" for e in r['entities'])
+
+
+@test('stream: chosen ASR model')
+def _():
+    async def go():
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(f'{STREAM}/ws/asr', timeout=30) as ws:
+                await ws.send_str(json.dumps({'type': 'start', 'language': 'hi', 'service_id': 'ai4bharat/conformer-hi-gpu--t4'}))
+                assert (await ws.receive_json(timeout=20))['type'] == 'ready'
+                await ws.send_str(json.dumps({'type': 'stop'}))
+            async with session.ws_connect(f'{STREAM}/ws/asr', timeout=30) as ws:
+                await ws.send_str(json.dumps({'type': 'start', 'language': 'ta', 'service_id': 'ai4bharat/conformer-hi-gpu--t4'}))
+                assert (await ws.receive_json(timeout=10))['type'] == 'error'
+    asyncio.run(go())
+
+
 if __name__ == '__main__':
     width = max(len(n) for n, *_ in results)
     for name, outcome, seconds, detail in results:

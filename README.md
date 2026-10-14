@@ -35,6 +35,7 @@ bhashini_kit/
 ├── server/
 │   ├── bhashini_client.py   ← pure Python client for every service
 │   ├── config.py            ← reads/writes config/bhashini.conf
+│   ├── models.py            ← selectable Bhashini models per task + languages
 │   ├── storage.py           ← saved transcripts
 │   ├── app.py               ← HTTP proxy + UI            (port 8765)
 │   └── stream_app.py        ← live ASR socket bridge + UI (port 8766)
@@ -81,6 +82,22 @@ No Docker? `pip install -r requirements.txt`, then run
 
 On a Mac without Docker Desktop: `brew install colima docker docker-compose && colima start`.
 
+## 1a. Choosing models
+
+Every panel has a **Model** menu listing the Bhashini models that support the selected language(s), from
+the [official list](https://dibd-bhashini.gitbook.io/bhashini-apis/available-models-for-usage)
+(catalog: `server/models.py`, also served at `GET /api/models`). The **Models** tab shows the full table.
+**Default** uses the model from Settings, or lets Bhashini choose. If the configured default can't handle
+a language (e.g. NER in English), the kit switches to one that can.
+
+Every model was called with a real key on 2026-10-14. Models marked ⚠ returned a Bhashini-side error
+then (IISc Maithili ASR, IITB trilingual NMT, IIITH printed and handwritten OCR) but stay in the list so they
+can be retried. Speaker and language diarization (listed by Bhashini) still returned 500 and are not offered.
+
+API: pass `service_id` (or `asr_service_id` / `nmt_service_id` / `tts_service_id` for
+`speech-translate`, `service_id` in the live socket's `start` message). Unknown IDs, or IDs that don't
+support the language, get a 422.
+
 ## 1b. Hosted version (Vercel)
 
 The HTTP app also runs on Vercel as a single Python function (`api/index.py`, `vercel.json`).
@@ -124,7 +141,8 @@ Share it only with the field team. If you leave it unset, anyone with the link c
 | `BHASHINI_ALD_SERVICE_ID` | `bhashini/iitmandi/audio-lang-detection/gpu` | Audio language detection |
 | `BHASHINI_NER_SERVICE_ID` | `bhashini/ai4bharat/indic-ner` | NER |
 | `BHASHINI_DENOISER_SERVICE_ID` | `bhashini/facebook/denoiser--gpu-t4` | Denoiser |
-| `BHASHINI_TLD_SERVICE_ID`, `BHASHINI_OCR_SERVICE_ID` | empty | Dhruva's defaults work |
+| `BHASHINI_OCR_SERVICE_ID` | `bhashini/bodhan/indic-doc/ocr` | OCR (much better than Dhruva's default on printed Hindi) |
+| `BHASHINI_TLD_SERVICE_ID` | empty | Dhruva's default works |
 | `BHASHINI_STREAM_URL` | `wss://dhruva-api.bhashini.gov.in` | Live ASR socket.io server |
 | `BHASHINI_STREAM_ASR_SERVICE_ID` | empty | Pin the streaming ASR model |
 | `ALLOWED_ORIGINS` | empty | CORS origins for the HTTP service, e.g. `http://localhost:3000` (restart to apply) |
@@ -241,7 +259,7 @@ docker compose --profile test run --rm test
 This runs `tests/test_endpoints.py` against both running containers with real Bhashini calls:
 health, settings (masking, write, validation, key test), every service above, validation errors,
 transcript save/list/download/delete, and live ASR over the socket. Test speech is generated with TTS,
-so no fixtures are needed. Last run: **21/21 passed**.
+so no fixtures are needed. It also checks model selection. Last run: **26/26 passed**.
 
 ## 6. Raw Bhashini request (for porting to any language)
 

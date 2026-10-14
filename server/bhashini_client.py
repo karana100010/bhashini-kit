@@ -19,6 +19,7 @@ import wave
 import requests
 
 import config
+import models
 
 DHRUVA = 'https://dhruva-api.bhashini.gov.in/services/inference'
 PIPELINE_URL = f'{DHRUVA}/pipeline'
@@ -30,7 +31,7 @@ SEGMENT_SECONDS = 30  # Long recordings are cut into pieces this size for ASR.
 MAX_AUDIO_SECONDS = 600
 
 LANGUAGES = {'en', 'hi', 'bn', 'ta', 'te', 'mr', 'gu', 'kn', 'ml', 'pa', 'or', 'as', 'ur', 'ne',
-             'sa', 'bho', 'mai', 'doi', 'kok', 'ks', 'sd', 'brx', 'mni', 'sat'}
+             'sa', 'bho', 'mai', 'doi', 'kok', 'ks', 'sd', 'brx', 'mni', 'sat', 'raj', 'mag', 'hne'}
 
 
 class BhashiniError(Exception):
@@ -122,8 +123,26 @@ def _service(prefix, language=''):
     return env(f'BHASHINI_{prefix}_SERVICE_ID_{language.upper()}', generic) if language else generic
 
 
-def _with_service(config_, prefix, language=''):
-    if service := _service(prefix, language):
+def _model(task, prefix, source='', target=None, chosen=None):
+    """Service ID to use: the caller's choice (must be in models.py), else the configured one,
+    else empty (Dhruva picks). A configured model that can't handle the language is swapped for
+    the first catalog model that can, so e.g. NER in English still works."""
+    if chosen:
+        model = models.find(task, chosen)
+        if not model:
+            raise BhashiniError('invalid_model', f'Unknown {task} model: {chosen!r}.', 422)
+        if not models.supports(model, source or None, target):
+            raise BhashiniError('invalid_model', f'{chosen} does not support this language.', 422)
+        return chosen
+    service = _service(prefix, source if source else '')
+    model = models.find(task, service)
+    if model and not models.supports(model, source or None, target):
+        return models.first_for(task, source or None, target) or service
+    return service
+
+
+def _with_service(config_, service):
+    if service:
         config_['serviceId'] = service
     return config_
 
@@ -192,23 +211,24 @@ def _audio_out(encoded):
         raise BhashiniError('invalid_response', 'Bhashini returned incomplete audio.') from None
 
 
-def _asr_config(language):
+def _asr_config(language, service_id=None):
     # vad trims silence; itn turns spoken numbers into digits ("एक दो" -> "1 2").
     return _with_service({'language': {'sourceLanguage': language}, 'audioFormat': 'wav', 'samplingRate': RATE,
-                          'preProcessors': ['vad'], 'postProcessors': ['itn']}, 'ASR', language)
+                          'preProcessors': ['vad'], 'postProcessors': ['itn']},
+                         _model('asr', 'ASR', language, chosen=service_id))
 
 
-def _tts_config(language, gender):
-    return {'language': {'sourceLanguage': language}, 'serviceId': _service('TTS', language),
+def _tts_config(language, gender, service_id=None):
+    return {'language': {'sourceLanguage': language}, 'serviceId': _model('tts', 'TTS', language, chosen=service_id),
             'gender': gender or env('BHASHINI_TTS_GENDER'), 'samplingRate': 8000}
 
 
 # --- speech ----------------------------------------------------------------------------------
 
-def detect_audio_language(audio_base64):
+def detect_audio_language(audio_base64, service_id=None):
     """Spoken language of base64 16 kHz WAV (first 30 s). Returns {language, score, candidates}."""
     pcm = _pcm(audio_base64)[:SEGMENT_SECONDS * RATE * 2]
-    config_ = _with_service({}, 'ALD')
+    config_ = _with_service({}, _model('audio-lang-detection', 'ALD', chosen=service_id))
     stage = _pipeline('audio-lang-detection', config_, {'audio': [{'audioContent': _wav_base64(pcm)}]}, 30)
     try:
         predictions = stage['output'][0]['langPrediction']
@@ -220,7 +240,7 @@ def detect_audio_language(audio_base64):
     return {**candidates[0], 'candidates': candidates}
 
 
-def transcribe(audio_base64, language):
+def transcribe(audio_base64, language, service_id=None):
     """Speech -> text. Base64 WAV, mono, 16-bit PCM, 16 kHz, 0.25 s-10 min.
 
     language='auto' runs audio language detection first. Recordings over 30 s are split at
@@ -231,10 +251,12 @@ def transcribe(audio_base64, language):
     if language == 'auto':
         detected = detect_audio_language(audio_base64)
         language = detected['language']
+        if service_id and not models.supports(models.find('asr', service_id) or {'languages': []}, language):
+            service_id = None  # The picked model can't do the detected language; let the default handle it.
     _check_language(language)
     pieces, offset = [], 0
     for segment in _segments(pcm):
-        stage = _pipeline('asr', _asr_config(language), {'audio': [{'audioContent': _wav_base64(segment)}]}, 60)
+        stage = _pipeline('asr', _asr_config(language, service_id), {'audio': [{'audioContent': _wav_base64(segment)}]}, 60)
         text = ' '.join(str(o.get('source', '')).strip() for o in stage.get('output') or []).strip()
         if text:
             pieces.append({'start': round(offset / 2 / RATE, 2), 'text': text})
@@ -256,7 +278,7 @@ def _speakable(text):
     return re.sub(r'[*_`]', '', text).strip()
 
 
-def synthesize(text, language, gender=None):
+def synthesize(text, language, gender=None, service_id=None):
     """Text -> speech. Returns ordered base64 audio segments (one per ~900-char chunk)."""
     _check_language(language)
     if not isinstance(text, str) or len(text) > 4000:
@@ -266,7 +288,7 @@ def synthesize(text, language, gender=None):
         raise BhashiniError('speech_empty', 'This text has nothing readable.', 422)
     segments = []
     for chunk in chunks:
-        stage = _pipeline('tts', _tts_config(language, gender), {'input': [{'source': chunk}]}, 30)
+        stage = _pipeline('tts', _tts_config(language, gender, service_id), {'input': [{'source': chunk}]}, 30)
         try:
             segments.append(_audio_out(stage['audio'][0]['audioContent']))
         except (KeyError, IndexError, TypeError):
@@ -274,17 +296,19 @@ def synthesize(text, language, gender=None):
     return {'language': language, 'segments': segments}
 
 
-def speech_translate(audio_base64, source, target, speak=False, gender=None):
+def speech_translate(audio_base64, source, target, speak=False, gender=None, asr_service_id=None,
+                     nmt_service_id=None, tts_service_id=None):
     """Speech in one language -> text (and optionally speech) in another, in one Dhruva call.
 
     Mirrors the collection's "ASR+NMT" and "ASR+NMT+TTS" compute requests. Max 45 s of audio.
     """
     _check_language(source, target)
     pcm = _pcm(audio_base64, max_seconds=45)
-    tasks = [('asr', _asr_config(source)),
-             ('translation', _with_service({'language': {'sourceLanguage': source, 'targetLanguage': target}}, 'NMT'))]
+    tasks = [('asr', _asr_config(source, asr_service_id)),
+             ('translation', _with_service({'language': {'sourceLanguage': source, 'targetLanguage': target}},
+                                           _model('translation', 'NMT', source, target, nmt_service_id)))]
     if speak:
-        tasks.append(('tts', _tts_config(target, gender)))
+        tasks.append(('tts', _tts_config(target, gender, tts_service_id)))
     stages = _run(tasks, {'audio': [{'audioContent': _wav_base64(pcm)}]}, 90)
     try:
         transcript = ' '.join(str(o.get('source', '')).strip() for o in stages['asr']['output'] or []).strip()
@@ -299,10 +323,10 @@ def speech_translate(audio_base64, source, target, speak=False, gender=None):
     return result
 
 
-def denoise(audio_base64):
+def denoise(audio_base64, service_id=None):
     """Remove background noise from base64 16 kHz WAV (max 45 s). Returns cleaned audio."""
     pcm = _pcm(audio_base64, max_seconds=45)
-    payload = {'config': _with_service({}, 'DENOISER'), 'audio': [{'audioContent': _wav_base64(pcm)}]}
+    payload = {'config': _with_service({}, _model('denoiser', 'DENOISER', chosen=service_id)), 'audio': [{'audioContent': _wav_base64(pcm)}]}
     body = _post(f'{DHRUVA}/denoiser', payload, 'denoiser', 60)
     try:
         return _audio_out(body['audio'][0]['audioContent'])
@@ -312,14 +336,15 @@ def denoise(audio_base64):
 
 # --- text ------------------------------------------------------------------------------------
 
-def translate(text, source, target):
+def translate(text, source, target, service_id=None):
     """Text -> text between two language codes, e.g. translate('Hello', 'en', 'hi')."""
     _check_language(source, target)
     _check_text(text)
     if source == target:
         return {'text': text}
     chunks = _chunks(text)
-    config_ = {'language': {'sourceLanguage': source, 'targetLanguage': target}, 'serviceId': _service('NMT')}
+    config_ = {'language': {'sourceLanguage': source, 'targetLanguage': target},
+               'serviceId': _model('translation', 'NMT', source, target, service_id)}
     stage = _pipeline('translation', config_, {'input': [{'source': c} for c in chunks]}, 30)
     outputs = stage.get('output') or []
     if len(outputs) != len(chunks) or any(not str(o.get('target', '')).strip() for o in outputs):
@@ -327,7 +352,7 @@ def translate(text, source, target):
     return {'text': '\n'.join(o['target'].strip() for o in outputs)}
 
 
-def transliterate(text, source, target, sentence=True, suggestions=5):
+def transliterate(text, source, target, sentence=True, suggestions=5, service_id=None):
     """Same words, other script: 'namaste' (en) -> 'नमस्ते' (hi), or back.
 
     sentence=True converts the whole text; sentence=False returns up to `suggestions`
@@ -336,7 +361,8 @@ def transliterate(text, source, target, sentence=True, suggestions=5):
     _check_language(source, target)
     _check_text(text, 1000)
     config_ = _with_service({'language': {'sourceLanguage': source, 'targetLanguage': target},
-                             'isSentence': bool(sentence)}, 'XLIT')
+                             'isSentence': bool(sentence)},
+                            _model('transliteration', 'XLIT', source, target, service_id))
     if not sentence:
         config_['numSuggestions'] = max(1, min(int(suggestions), 10))
     stage = _pipeline('transliteration', config_, {'input': [{'source': text.strip()}]}, 20)
@@ -349,10 +375,10 @@ def transliterate(text, source, target, sentence=True, suggestions=5):
     return {'text': options[0], 'suggestions': options}
 
 
-def detect_language(text):
+def detect_language(text, service_id=None):
     """Language of a piece of text. Returns {language, script, score, candidates}."""
     _check_text(text, 1000)
-    stage = _pipeline('txt-lang-detection', _with_service({}, 'TLD'), {'input': [{'source': text.strip()}]}, 20)
+    stage = _pipeline('txt-lang-detection', _with_service({}, _model('txt-lang-detection', 'TLD', chosen=service_id)), {'input': [{'source': text.strip()}]}, 20)
     try:
         candidates = [{'language': p['langCode'], 'script': p.get('scriptCode'), 'score': p.get('langScore')}
                       for p in stage['output'][0]['langPrediction']]
@@ -361,11 +387,11 @@ def detect_language(text):
         raise BhashiniError('invalid_response', 'Bhashini returned an incomplete language detection.') from None
 
 
-def entities(text, language):
+def entities(text, language, service_id=None):
     """Named entities (people, places, organisations) in Indic-language text."""
     _check_language(language)
     _check_text(text)
-    config_ = _with_service({'language': {'sourceLanguage': language}}, 'NER')
+    config_ = _with_service({'language': {'sourceLanguage': language}}, _model('ner', 'NER', language, chosen=service_id))
     stage = _pipeline('ner', config_, {'input': [{'source': text.strip()}]}, 20)
     try:
         found = stage['output'][0].get('nerPrediction') or []
@@ -377,7 +403,7 @@ def entities(text, language):
 
 # --- image -----------------------------------------------------------------------------------
 
-def ocr(language, image_base64=None, image_url=None):
+def ocr(language, image_base64=None, image_url=None, service_id=None):
     """Printed text in an image (photo of a register, form, notice). Give base64 or a public URL."""
     _check_language(language)
     if image_base64:
@@ -392,7 +418,7 @@ def ocr(language, image_base64=None, image_url=None):
         image = {'imageUri': image_url}
     else:
         raise BhashiniError('invalid_image', 'Send image_content (base64) or an https image_url.', 422)
-    config_ = _with_service({'language': {'sourceLanguage': language}}, 'OCR')
+    config_ = _with_service({'language': {'sourceLanguage': language}}, _model('ocr', 'OCR', language, chosen=service_id))
     stage = _pipeline('ocr', config_, {'image': [image]}, 90)
     words = [str(o.get('source', '')).strip() for o in stage.get('output') or []]
     text = ' '.join(w for w in words if w)

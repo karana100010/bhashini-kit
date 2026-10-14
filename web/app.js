@@ -14,7 +14,7 @@ const LANGUAGES = {
     hi: 'Hindi', en: 'English', bn: 'Bengali', ta: 'Tamil', te: 'Telugu', mr: 'Marathi', gu: 'Gujarati',
     kn: 'Kannada', ml: 'Malayalam', pa: 'Punjabi', or: 'Odia', as: 'Assamese', ur: 'Urdu', ne: 'Nepali',
     sa: 'Sanskrit', bho: 'Bhojpuri', mai: 'Maithili', doi: 'Dogri', kok: 'Konkani', ks: 'Kashmiri',
-    sd: 'Sindhi', brx: 'Bodo', mni: 'Manipuri', sat: 'Santali',
+    sd: 'Sindhi', brx: 'Bodo', mni: 'Manipuri', sat: 'Santali', mag: 'Magahi', hne: 'Chhattisgarhi', raj: 'Rajasthani',
 };
 const langName = code => LANGUAGES[code] ? `${LANGUAGES[code]} (${code})` : code;
 
@@ -57,6 +57,52 @@ document.querySelectorAll('select[data-langs]').forEach(select => {
     for (const [code] of Object.entries(LANGUAGES)) if (!exclude.includes(code)) select.add(new Option(langName(code), code));
     select.value = select.dataset.default || 'hi';
 });
+
+// --- model menus: <select data-model="task" data-src="langSelectId" data-tgt="langSelectId"> --------
+const TASK_NAMES = {
+    asr: 'Speech → text', translation: 'Translation', transliteration: 'Transliteration', tts: 'Text → speech',
+    'audio-lang-detection': 'Audio language detection', 'txt-lang-detection': 'Text language detection',
+    ner: 'Names & places', ocr: 'OCR', denoiser: 'Denoiser',
+};
+let catalog = { models: {}, defaults: {} };
+const shortId = id => id.replace(/^bhashini\//i, '');
+const fits = (m, src, tgt) => m.source
+    ? (!src || m.source.includes(src)) && (!tgt || m.target.includes(tgt))
+    : !src || src === 'auto' || !m.languages.length || m.languages.includes(src);
+
+function fillModelMenu(select) {
+    const task = select.dataset.model, previous = select.value;
+    const src = select.dataset.src && $(select.dataset.src).value, tgt = select.dataset.tgt && $(select.dataset.tgt).value;
+    const models = (catalog.models[task] || []).filter(m => fits(m, src, tgt));
+    const fallback = catalog.defaults[task];
+    const label = m => `${m.ok ? '' : '⚠ '}${m.provider} · ${shortId(m.id)}${m.note ? ` (${m.note})` : ''}`;
+    select.replaceChildren(new Option(fallback && models.some(m => m.id === fallback) ? `Default (${shortId(fallback)})` : 'Default (best available)', ''),
+        ...models.map(m => new Option(label(m), m.id)));
+    select.value = models.some(m => m.id === previous) ? previous : '';
+    select.title = models.length ? `${models.length} model(s) for this language` : 'No listed model supports this language; Bhashini will try its default.';
+}
+const model = id => $(id).value || undefined;
+
+async function loadModels() {
+    try { catalog = await bhashini.listModels(); } catch { return; }
+    fillDatalists();
+    document.querySelectorAll('select[data-model]').forEach(select => {
+        fillModelMenu(select);
+        for (const key of ['src', 'tgt']) if (select.dataset[key]) $(select.dataset[key]).addEventListener('change', () => fillModelMenu(select));
+    });
+    const langs = m => (m.source ? `${m.source.join(' ')} → ${m.target.join(' ')}` : m.languages.join(' ')) || 'any';
+    $('modelsTable').tBodies[0].replaceChildren(...Object.entries(catalog.models).flatMap(([task, list]) => list.map(m => {
+        const row = document.createElement('tr');
+        row.className = m.ok ? '' : 'down';
+        for (const text of [TASK_NAMES[task] || task, null, `${m.provider}${m.note ? ` · ${m.note}` : ''}`, langs(m)]) {
+            const cell = row.insertCell();
+            if (text === null) cell.append(Object.assign(document.createElement('code'), { textContent: `${m.ok ? '' : '⚠ '}${m.id}` }));
+            else cell.textContent = text;
+        }
+        row.cells[3].className = 'langs';
+        return row;
+    })));
+}
 
 // --- reusable audio input: record (auto-stops on silence) or upload --------------------------
 function audioInput(container) {
@@ -112,7 +158,7 @@ function audioInput(container) {
 const asrAudio = audioInput($('asrAudio'));
 let lastAsr = null;
 $('asrRun').onclick = () => run($('asrRun'), 'Transcribing… long recordings take a while.', async () => {
-    const result = await bhashini.transcribeDetailed(asrAudio.require(), $('asrLang').value);
+    const result = await bhashini.transcribeDetailed(asrAudio.require(), $('asrLang').value, { serviceId: model('asrModel') });
     lastAsr = result;
     $('asrText').value = result.text;
     const detected = result.detected ? ` · detected ${langName(result.detected.language)}` : '';
@@ -136,7 +182,7 @@ $('asrCopy').onclick = () => run($('asrCopy'), 'Copying…', async () => { await
 // --- Text -> Speech --------------------------------------------------------------------------
 $('ttsRun').onclick = () => run($('ttsRun'), 'Generating speech…', async () => {
     const text = $('ttsText').value, language = $('ttsLang').value, gender = $('ttsGender').value;
-    const { segments } = await bhashini.post('tts', { text, language, gender }, 90000);
+    const { segments } = await bhashini.post('tts', { text, language, gender, service_id: model('ttsModel') }, 90000);
     $('ttsDownload').href = URL.createObjectURL(base64Blob(segments[0].audio_content, segments[0].mime_type));
     $('ttsDownload').classList.remove('hidden');
     status('Playing…');
@@ -153,7 +199,7 @@ $('ttsStop').onclick = () => { ttsPlaying?.pause(); bhashini.stop(); };
 const voiceAudio = audioInput($('voiceAudio'));
 $('voiceRun').onclick = () => run($('voiceRun'), 'Recognising, translating, speaking…', async () => {
     const result = await bhashini.speechTranslate(voiceAudio.require(), $('voiceSrc').value, $('voiceTgt').value,
-        { speak: $('voiceSpeak').checked });
+        { speak: $('voiceSpeak').checked, asrServiceId: model('voiceAsrModel'), nmtServiceId: model('voiceNmtModel'), ttsServiceId: model('voiceTtsModel') });
     $('voiceHeard').textContent = result.transcript;
     $('voiceOut').textContent = result.translation;
     $('voicePlayer').classList.toggle('hidden', !result.audio);
@@ -172,7 +218,7 @@ $('denoiseRun').onclick = () => run($('denoiseRun'), 'Removing noise…', async 
 // --- Translate -------------------------------------------------------------------------------
 $('trSwap').onclick = () => { [$('trSrc').value, $('trTgt').value] = [$('trTgt').value, $('trSrc').value]; };
 $('trRun').onclick = () => run($('trRun'), 'Translating…', async () => {
-    $('trOut').textContent = await bhashini.translate($('trIn').value, $('trSrc').value, $('trTgt').value);
+    $('trOut').textContent = await bhashini.translate($('trIn').value, $('trSrc').value, $('trTgt').value, { serviceId: model('trModel') });
 });
 $('trSpeak').onclick = () => run($('trSpeak'), 'Speaking…', async () => {
     if (!$('trOut').textContent.trim()) throw new Error('Translate something first.');
@@ -181,13 +227,13 @@ $('trSpeak').onclick = () => run($('trSpeak'), 'Speaking…', async () => {
 
 // --- Transliterate ---------------------------------------------------------------------------
 $('xlRun').onclick = () => run($('xlRun'), 'Transliterating…', async () => {
-    const result = await bhashini.transliterate($('xlIn').value, $('xlSrc').value, $('xlTgt').value);
+    const result = await bhashini.transliterate($('xlIn').value, $('xlSrc').value, $('xlTgt').value, { serviceId: model('xlModel') });
     $('xlOut').textContent = result.text;
     $('xlSuggest').innerHTML = '';
 });
 $('xlWord').onclick = () => run($('xlWord'), 'Getting suggestions…', async () => {
     const words = $('xlIn').value.trim().split(/\s+/);
-    const result = await bhashini.transliterate(words.at(-1), $('xlSrc').value, $('xlTgt').value, { sentence: false, suggestions: 6 });
+    const result = await bhashini.transliterate(words.at(-1), $('xlSrc').value, $('xlTgt').value, { sentence: false, suggestions: 6, serviceId: model('xlModel') });
     $('xlSuggest').replaceChildren(...result.suggestions.map(word => {
         const chip = Object.assign(document.createElement('button'), { textContent: word, title: 'Use this word' });
         chip.onclick = () => { words[words.length - 1] = word; $('xlIn').value = words.join(' '); };
@@ -198,20 +244,20 @@ $('xlWord').onclick = () => run($('xlWord'), 'Getting suggestions…', async () 
 // --- Detect language -------------------------------------------------------------------------
 const formatScore = s => (typeof s === 'number' ? ` · confidence ${Math.min(100, s * 100).toFixed(0)}%` : '');
 $('tldRun').onclick = () => run($('tldRun'), 'Detecting…', async () => {
-    const r = await bhashini.detectLanguage($('tldIn').value);
+    const r = await bhashini.detectLanguage($('tldIn').value, { serviceId: model('tldModel') });
     $('tldOut').textContent = `${langName(r.language)} · script ${r.script}${formatScore(r.score)}`;
 });
 const aldAudio = audioInput($('aldAudio'));
 $('aldRun').onclick = () => run($('aldRun'), 'Listening for the language…', async () => {
-    const r = await bhashini.detectAudioLanguage(aldAudio.require());
+    const r = await bhashini.detectAudioLanguage(aldAudio.require(), { serviceId: model('aldModel') });
     $('aldOut').textContent = `${langName(r.language)}${formatScore(r.score)}`;
 });
 
 // --- NER -------------------------------------------------------------------------------------
-const TAGS = { PER: 'person', LOC: 'place', ORG: 'organisation' };
+const TAGS = { PER: 'person', PERSON: 'person', LOC: 'place', PLACE: 'place', ORG: 'organisation', ORGANIZATION: 'organisation', ORGANISATION: 'organisation' };
 $('nerRun').onclick = () => run($('nerRun'), 'Finding names…', async () => {
     const text = $('nerIn').value;
-    const { entities } = await bhashini.entities(text, $('nerLang').value);
+    const { entities } = await bhashini.entities(text, $('nerLang').value, { serviceId: model('nerModel') });
     if (!entities.length) { $('nerOut').textContent = 'No names or places found.'; return; }
     const fragment = document.createDocumentFragment();
     entities.forEach((e, i) => {
@@ -240,7 +286,7 @@ $('ocrFile').onchange = async event => {
 $('ocrRun').onclick = () => run($('ocrRun'), 'Reading the image… (5–15 s)', async () => {
     const imageUrl = $('ocrUrl').value.trim();
     if (!ocrImage && !imageUrl) throw new Error('Choose an image or paste an image URL.');
-    const r = await bhashini.ocr({ imageBase64: imageUrl ? undefined : ocrImage, imageUrl: imageUrl || undefined, language: $('ocrLang').value });
+    const r = await bhashini.ocr({ imageBase64: imageUrl ? undefined : ocrImage, imageUrl: imageUrl || undefined, language: $('ocrLang').value, serviceId: model('ocrModel') });
     $('ocrOut').textContent = r.text;
 });
 $('ocrToTr').onclick = () => {
@@ -289,8 +335,18 @@ const SERVICE_LABELS = {
     BHASHINI_OCR_SERVICE_ID: 'OCR', BHASHINI_DENOISER_SERVICE_ID: 'Denoiser',
     BHASHINI_STREAM_ASR_SERVICE_ID: 'Streaming ASR', BHASHINI_STREAM_URL: 'Streaming socket URL',
 };
+const SETTING_TASK = {
+    BHASHINI_ASR_SERVICE_ID: 'asr', BHASHINI_NMT_SERVICE_ID: 'translation', BHASHINI_TTS_SERVICE_ID: 'tts',
+    BHASHINI_XLIT_SERVICE_ID: 'transliteration', BHASHINI_TLD_SERVICE_ID: 'txt-lang-detection',
+    BHASHINI_ALD_SERVICE_ID: 'audio-lang-detection', BHASHINI_NER_SERVICE_ID: 'ner', BHASHINI_OCR_SERVICE_ID: 'ocr',
+    BHASHINI_DENOISER_SERVICE_ID: 'denoiser', BHASHINI_STREAM_ASR_SERVICE_ID: 'asr',
+};
 $('serviceFields').innerHTML = Object.entries(SERVICE_LABELS).map(([name, label]) =>
-    `<label class="block">${label}<input name="${name}" autocomplete="off"></label>`).join('');
+    `<label class="block">${label}<input name="${name}" autocomplete="off"${SETTING_TASK[name] ? ` list="models-${SETTING_TASK[name]}"` : ''}></label>`).join('')
+    + Object.keys(TASK_NAMES).map(task => `<datalist id="models-${task}"></datalist>`).join('');
+const fillDatalists = () => Object.entries(catalog.models).forEach(([task, list]) => {
+    $(`models-${task}`)?.replaceChildren(...list.map(m => new Option(`${m.provider}${m.ok ? '' : ' ⚠'}`, m.id)));
+});
 
 function showKeyState(snapshot) {
     $('keyBadge').textContent = snapshot.key_set ? 'API key set' : 'No API key: open Settings';
@@ -338,6 +394,7 @@ $('accessForm').onsubmit = async event => {
         $('accessGate').classList.add('hidden');
         $('accessInput').value = '';
         await loadSettings();
+        loadModels();
     } catch (error) {
         askAccessCode(error.status === 401 ? 'That code is not right.' : error.message);
     }
@@ -361,6 +418,7 @@ async function boot() {
     }
     showTab(location.hash.slice(1) && $('tabs').querySelector(`[data-tab="${location.hash.slice(1)}"]:not(.hidden)`) ? location.hash.slice(1) : 'asr');
     if (features.access_required && !accessCode) return askAccessCode();
+    loadModels();
     loadSettings().then(s => { if (!s.key_set && features.settings_writable !== false) showTab('settings'); })
         .catch(error => { if (error.status === 401) askAccessCode('Your saved code no longer works.'); });
 }

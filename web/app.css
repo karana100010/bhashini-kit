@@ -90,3 +90,12 @@ summary { cursor: pointer; color: var(--muted); }
 .gate { position: fixed; inset: 0; background: rgba(10, 14, 20, .55); display: grid; place-items: center; padding: 16px; z-index: 10; }
 .gate-box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: min(420px, 100%); }
 .error-text { color: var(--warn); min-height: 1.2em; margin: 6px 0 0; }
+
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+td code { word-break: break-all; }
+td.langs { color: var(--muted); min-width: 220px; }
+tr.down td { opacity: .6; }
+select[data-model] { max-width: 280px; }

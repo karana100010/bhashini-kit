@@ -39,8 +39,8 @@ export function createBhashini({ baseUrl = '', workletUrl = new URL('./pcm-workl
     }
 
     /** Text -> text. */
-    async function translate(text, source, target) {
-        return (await post('translate', { text, source, target })).text;
+    async function translate(text, source, target, { serviceId } = {}) {
+        return (await post('translate', { text, source, target, service_id: serviceId })).text;
     }
 
     /** Base64 16 kHz mono WAV -> text. language may be 'auto'. */
@@ -49,33 +49,38 @@ export function createBhashini({ baseUrl = '', workletUrl = new URL('./pcm-workl
     }
 
     /** Same as transcribe, but returns {text, language, duration, segments, detected?}. Up to 10 minutes. */
-    async function transcribeDetailed(wavBase64, language) {
-        return post('asr', { audio_content: wavBase64, language }, 600000);
+    async function transcribeDetailed(wavBase64, language, { serviceId } = {}) {
+        return post('asr', { audio_content: wavBase64, language, service_id: serviceId }, 600000);
     }
 
     /** Spoken language of a recording -> {language, score, candidates}. */
-    const detectAudioLanguage = wavBase64 => post('detect-audio-language', { audio_content: wavBase64 });
+    const detectAudioLanguage = (wavBase64, { serviceId } = {}) =>
+        post('detect-audio-language', { audio_content: wavBase64, service_id: serviceId });
 
     /** Speech in `source` -> {transcript, translation, audio?} in `target`. Max 45 s. */
-    const speechTranslate = (wavBase64, source, target, { speak = false, gender } = {}) =>
-        post('speech-translate', { audio_content: wavBase64, source, target, speak, gender }, 120000);
+    const speechTranslate = (wavBase64, source, target, { speak = false, gender, asrServiceId, nmtServiceId, ttsServiceId } = {}) =>
+        post('speech-translate', { audio_content: wavBase64, source, target, speak, gender,
+            asr_service_id: asrServiceId, nmt_service_id: nmtServiceId, tts_service_id: ttsServiceId }, 120000);
 
     /** Remove background noise -> {audio_content, mime_type}. Max 45 s. */
-    const denoise = wavBase64 => post('denoise', { audio_content: wavBase64 }, 90000);
+    const denoise = (wavBase64, { serviceId } = {}) => post('denoise', { audio_content: wavBase64, service_id: serviceId }, 90000);
 
     /** Same words in another script. sentence:false returns suggestions for one word. */
-    const transliterate = (text, source, target, { sentence = true, suggestions = 5 } = {}) =>
-        post('transliterate', { text, source, target, sentence, suggestions });
+    const transliterate = (text, source, target, { sentence = true, suggestions = 5, serviceId } = {}) =>
+        post('transliterate', { text, source, target, sentence, suggestions, service_id: serviceId });
 
     /** Language of a piece of text -> {language, script, score, candidates}. */
-    const detectLanguage = text => post('detect-language', { text });
+    const detectLanguage = (text, { serviceId } = {}) => post('detect-language', { text, service_id: serviceId });
 
     /** Named entities in Indic text -> {entities: [{text, tag, start, end}]}. */
-    const entities = (text, language) => post('ner', { text, language });
+    const entities = (text, language, { serviceId } = {}) => post('ner', { text, language, service_id: serviceId });
 
     /** Printed text in a PNG/JPEG -> {text}. Pass {imageBase64} or {imageUrl}. */
-    const ocr = ({ imageBase64, imageUrl, language }) =>
-        post('ocr', { image_content: imageBase64, image_url: imageUrl, language }, 120000);
+    const ocr = ({ imageBase64, imageUrl, language, serviceId }) =>
+        post('ocr', { image_content: imageBase64, image_url: imageUrl, language, service_id: serviceId }, 120000);
+
+    /** Selectable models per task: {models: {asr: [{id, provider, languages|source+target, ok}], ...}, defaults}. */
+    const listModels = () => post('/api/models', undefined, 15000, 'GET');
 
     /** Saved transcripts (server-side, data/transcripts/). */
     const saveTranscript = ({ text, language, source = 'asr', title = '', audioBase64 } = {}) =>
@@ -84,9 +89,9 @@ export function createBhashini({ baseUrl = '', workletUrl = new URL('./pcm-workl
     const deleteTranscript = id => post(`/api/transcripts/${encodeURIComponent(id)}`, undefined, 30000, 'DELETE');
 
     /** Text -> spoken audio. Resolves when playback finishes; call stop() to cut it short. */
-    async function speak(text, language, { gender } = {}) {
+    async function speak(text, language, { gender, serviceId } = {}) {
         stop();
-        const { segments } = await post('tts', { text, language, gender }, 90000);
+        const { segments } = await post('tts', { text, language, gender, service_id: serviceId }, 90000);
         const current = { stopped: false, audio: null };
         player = current;
         for (const segment of segments) {
@@ -159,7 +164,7 @@ export function createBhashini({ baseUrl = '', workletUrl = new URL('./pcm-workl
     return {
         translate, transcribe, transcribeDetailed, speak, stop, startRecording, recordAndTranscribe,
         detectAudioLanguage, speechTranslate, denoise, transliterate, detectLanguage, entities, ocr,
-        saveTranscript, listTranscripts, deleteTranscript, post,
+        saveTranscript, listTranscripts, deleteTranscript, listModels, post,
     };
 }
 

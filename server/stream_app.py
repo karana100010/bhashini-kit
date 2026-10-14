@@ -7,7 +7,7 @@ The browser opens a plain WebSocket to /ws/asr. This server opens Dhruva's socke
 the API key, so the key never reaches the browser.
 
 Browser -> server
-  text   {"type": "start", "language": "hi"}         first message
+  text   {"type": "start", "language": "hi", "service_id"?}   first message (service_id: an ASR model)
   binary 16 kHz mono 16-bit little-endian PCM         as it is recorded (any chunk size)
   text   {"type": "flush"}                            end of an utterance: finalise text so far
   text   {"type": "stop"}                             finalise and close
@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 import bhashini_client as bhashini
 import config
+import models
 import storage
 
 log = logging.getLogger('bhashini.stream')
@@ -40,8 +41,8 @@ app = FastAPI(title='Bhashini streaming ASR')
 class Bridge:
     """One Dhruva socket.io session for one browser WebSocket."""
 
-    def __init__(self, websocket, language):
-        self.websocket, self.language = websocket, language
+    def __init__(self, websocket, language, service_id=None):
+        self.websocket, self.language, self.service_id = websocket, language, service_id
         self.sio = socketio.AsyncClient(reconnection=False)
         self.ready, self.finished = asyncio.Event(), asyncio.Event()
         self.sio.on('ready', self._on_ready)
@@ -83,7 +84,7 @@ class Bridge:
                                transports=['websocket'], auth={'authorization': key}, wait_timeout=15)
         task_config = {'language': {'sourceLanguage': self.language}, 'samplingRate': 16000,
                        'audioFormat': 'wav', 'encoding': None}
-        if service := bhashini._service('STREAM_ASR', self.language):
+        if service := self.service_id or bhashini._service('STREAM_ASR', self.language):
             task_config['serviceId'] = service
         await self.sio.emit('start', ([{'taskType': 'asr', 'config': task_config}], STREAMING))
         await asyncio.wait_for(self.ready.wait(), 15)
@@ -114,7 +115,13 @@ async def asr_stream(websocket: WebSocket):
         if start.get('type') != 'start' or language not in bhashini.LANGUAGES:
             await websocket.send_json({'type': 'error', 'message': 'First message must be {"type":"start","language":"hi"}.'})
             return
-        bridge = Bridge(websocket, language)
+        service_id = start.get('service_id') or None
+        if service_id:
+            model = models.find('asr', service_id)
+            if not model or not models.supports(model, language):
+                await websocket.send_json({'type': 'error', 'message': f'{service_id} does not support {language}.'})
+                return
+        bridge = Bridge(websocket, language, service_id)
         await bridge.open()
         while True:
             message = await websocket.receive()
@@ -160,6 +167,11 @@ async def save_transcript(body: SaveRequest):
         return storage.save(body.text, body.language, 'stream', body.audio_content, body.title)
     except storage.StorageError as error:
         return JSONResponse({'error': {'code': 'invalid_transcript', 'message': str(error)}}, status_code=422)
+
+
+@app.get('/api/models')
+async def asr_models():
+    return {'models': {'asr': models.MODELS['asr']}}
 
 
 @app.get('/healthz')
