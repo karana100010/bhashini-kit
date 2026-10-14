@@ -5,6 +5,5 @@
       "maxDuration": 60,
       "includeFiles": "{server,web}/**"
     }
-  },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  }
 }
