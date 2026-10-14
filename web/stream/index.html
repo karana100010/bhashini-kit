@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Live ASR Stream</title>
+    <style>
+        :root { --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #5d6675; --line: #dde1e7; --accent: #0b6e4f; --on-accent: #fff; --warn: #a33b20; --soft: #e9f4ef; color-scheme: light; }
+        @media (prefers-color-scheme: dark) {
+            :root { --bg: #12151a; --panel: #1b2027; --text: #e6e9ee; --muted: #9aa3b1; --line: #2d343e; --accent: #3fb68b; --on-accent: #0d1a14; --warn: #ff8f70; --soft: #1d2d27; color-scheme: dark; }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif; }
+        main { max-width: 760px; margin: 0 auto; padding: 20px 16px 60px; }
+        h1 { font-size: 20px; margin: 0 0 4px; }
+        p { color: var(--muted); margin: 4px 0 14px; }
+        .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+        .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
+        button, select, input, label.file { font: inherit; color: inherit; border: 1px solid var(--line); background: var(--panel); padding: 7px 14px; border-radius: 8px; }
+        button { cursor: pointer; }
+        button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+        button.live { background: var(--warn); border-color: var(--warn); color: #fff; }
+        button:disabled { opacity: .5; }
+        input { background: var(--bg); flex: 1 1 200px; }
+        label.file { cursor: pointer; border-style: dashed; }
+        label.file input { display: none; }
+        #transcript { min-height: 8em; white-space: pre-wrap; }
+        #partial { color: var(--muted); font-style: italic; }
+        #status { min-height: 1.5em; color: var(--muted); }
+        #status.error { color: var(--warn); }
+        .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--line); margin-right: 6px; }
+        .dot.on { background: var(--warn); animation: pulse 1s infinite; }
+        @keyframes pulse { 50% { opacity: .3; } }
+        a { color: var(--accent); }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Live ASR <span style="font-weight:400;color:var(--muted)">· socket streaming example</span></h1>
+    <p>Words appear while you speak. The browser talks to this service over a WebSocket; the service relays to Bhashini's socket.io stream and keeps the API key. Separate from the <a id="httpLink" href="#">HTTP kit</a>.</p>
+
+    <div class="card">
+        <div class="row">
+            <label>Language <select id="language">
+                <option value="hi">Hindi</option><option value="en">English</option><option value="bn">Bengali</option>
+                <option value="ta">Tamil</option><option value="te">Telugu</option><option value="mr">Marathi</option>
+                <option value="gu">Gujarati</option><option value="kn">Kannada</option><option value="ml">Malayalam</option>
+                <option value="pa">Punjabi</option><option value="or">Odia</option><option value="as">Assamese</option>
+            </select></label>
+            <button id="mic" class="primary">🎤 Start live</button>
+            <label class="file">▶ Stream an audio file <input type="file" id="file" accept="audio/*"></label>
+        </div>
+        <div id="status"><span class="dot" id="dot"></span><span id="statusText">Idle</span></div>
+    </div>
+
+    <div class="card">
+        <div id="transcript"></div>
+        <div id="partial"></div>
+    </div>
+
+    <div class="card">
+        <div class="row">
+            <input id="title" placeholder="Title (optional)">
+            <label><input type="checkbox" id="keepAudio" checked style="flex:none"> keep audio</label>
+            <button id="save" class="primary">💾 Save</button>
+            <button id="download">⬇ .txt</button>
+            <button id="clear">Clear</button>
+        </div>
+    </div>
+</main>
+
+<script type="module">
+    import { createLiveAsr } from './stream.js';
+
+    const $ = id => document.getElementById(id);
+    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/asr`;
+    $('httpLink').href = `${location.protocol}//${location.hostname}:8765/`;
+    let live = null, lastWav = null;
+    const lines = [];
+
+    const status = (text, { error = false, on = false } = {}) => {
+        $('statusText').textContent = text;
+        $('status').classList.toggle('error', error);
+        $('dot').classList.toggle('on', on);
+    };
+    const render = () => { $('transcript').textContent = lines.join('\n'); };
+
+    function session() {
+        return createLiveAsr({
+            url: wsUrl, language: $('language').value,
+            onReady: () => status('Listening… pause briefly between sentences.', { on: true }),
+            onPartial: text => { $('partial').textContent = text; },
+            onFinal: text => { if (text) { lines.push(text); render(); } $('partial').textContent = ''; },
+            onError: message => status(`⚠ ${message}`, { error: true }),
+        });
+    }
+    async function finish() {
+        status('Finishing…');
+        await live.stop();
+        lastWav = live.recordingWav();
+        live = null;
+        $('mic').textContent = '🎤 Start live';
+        $('mic').classList.remove('live');
+        $('file').disabled = false;
+        if (!$('statusText').textContent.startsWith('⚠')) status('Stopped');
+    }
+
+    $('mic').onclick = async () => {
+        if (live) return finish();
+        live = session();
+        $('mic').textContent = '⏹ Stop';
+        $('mic').classList.add('live');
+        $('file').disabled = true;
+        status('Connecting…');
+        try { await live.startMic(); } catch (error) { status(`⚠ ${error.message}`, { error: true }); await finish(); }
+    };
+
+    $('file').onchange = async event => {
+        const file = event.target.files[0];
+        event.target.value = '';
+        if (!file || live) return;
+        live = session();
+        $('mic').textContent = '⏹ Stop';
+        $('mic').classList.add('live');
+        status('Connecting…');
+        try { await live.streamFile(file); } catch (error) { status(`⚠ ${error.message}`, { error: true }); }
+        if (live) await finish();
+    };
+
+    $('save').onclick = async () => {
+        const text = lines.join('\n').trim();
+        if (!text) return status('Nothing to save yet.', { error: true });
+        const response = await fetch('api/transcripts', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, language: $('language').value, title: $('title').value,
+                                   audio_content: $('keepAudio').checked ? lastWav : null }),
+        });
+        const data = await response.json();
+        status(response.ok ? `✓ Saved as ${data.id}. It is listed under “Saved transcripts” in the HTTP kit.` : `⚠ ${data.error.message}`, { error: !response.ok });
+    };
+    $('download').onclick = () => {
+        const a = Object.assign(document.createElement('a'), {
+            href: URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })),
+            download: `${($('title').value.trim() || 'live-transcript').replace(/[^\p{L}\p{N}_ -]+/gu, '_')}.txt`,
+        });
+        a.click();
+    };
+    $('clear').onclick = () => { lines.length = 0; lastWav = null; render(); $('partial').textContent = ''; };
+</script>
+</body>
+</html>

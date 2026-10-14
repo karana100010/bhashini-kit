@@ -1,0 +1,7 @@
+.env
+config/bhashini.conf
+config/*.tmp
+data/
+__pycache__/
+.venv/
+.vercel/

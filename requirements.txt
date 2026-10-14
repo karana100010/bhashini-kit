@@ -1,0 +1,5 @@
+requests>=2.31
+fastapi>=0.115.0
+uvicorn[standard]>=0.30
+python-socketio[asyncio_client]>=5.11
+aiohttp>=3.9

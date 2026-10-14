@@ -1,0 +1,52 @@
+# docker compose up --build
+#   http://localhost:8765  HTTP services + UI (ASR, TTS, NMT, transliteration, OCR, ...)
+#   http://localhost:8766  live ASR over a socket (separate service)
+# Both read ./config/bhashini.conf (written by the Settings page) and save to ./data.
+x-kit: &kit
+  build: .
+  image: bhashini-kit:latest
+  restart: unless-stopped
+  environment:
+    TZ: IST-5:30   # POSIX form; the slim image has no tzdata. Used for saved-transcript timestamps.
+  volumes:
+    - ./config:/app/config
+    - ./data:/app/data
+
+services:
+  http:
+    <<: *kit
+    container_name: bhashini-http
+    command: ["uvicorn", "app:app", "--app-dir", "server", "--host", "0.0.0.0", "--port", "8765"]
+    ports:
+      - "127.0.0.1:8765:8765"   # localhost only: the Settings page can change the API key
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  asr-stream:
+    <<: *kit
+    container_name: bhashini-asr-stream
+    command: ["uvicorn", "stream_app:app", "--app-dir", "server", "--host", "0.0.0.0", "--port", "8766"]
+    ports:
+      - "127.0.0.1:8766:8766"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8766/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # End-to-end tests against the two services above (real Bhashini calls):
+  #   docker compose --profile test run --rm test
+  test:
+    image: bhashini-kit:latest
+    profiles: ["test"]
+    depends_on: [http, asr-stream]
+    working_dir: /app
+    volumes:
+      - ./tests:/app/tests:ro
+    environment:
+      BASE_URL: http://http:8765
+      STREAM_URL: ws://asr-stream:8766
+    command: ["python", "tests/test_endpoints.py"]

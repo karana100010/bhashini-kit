@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GramStack Field Visit Companion</title>
+    <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+    <div class="brand">GramStack Field Visit Companion</div>
+    <div class="top-right">
+        <a id="streamLink" href="#" target="_blank" rel="noopener">Live ASR (socket) ↗</a>
+        <span id="keyBadge" class="badge">checking key…</span>
+    </div>
+</header>
+
+<div class="layout">
+    <nav id="tabs" aria-label="Services">
+        <div class="group">Speech</div>
+        <button data-tab="asr" class="active">Speech → Text</button>
+        <button data-tab="tts">Text → Speech</button>
+        <button data-tab="voice">Voice translate</button>
+        <button data-tab="denoise">Denoise audio</button>
+        <div class="group">Text</div>
+        <button data-tab="translate">Translate</button>
+        <button data-tab="xlit">Transliterate</button>
+        <button data-tab="detect">Detect language</button>
+        <button data-tab="ner">Names &amp; places</button>
+        <div class="group">Image</div>
+        <button data-tab="ocr">Read image (OCR)</button>
+        <div class="group">Kit</div>
+        <button data-tab="saved">Saved transcripts</button>
+        <button data-tab="settings">Settings</button>
+    </nav>
+
+    <main>
+        <p id="status" role="status" aria-live="polite"></p>
+
+        <!-- Speech -> Text -->
+        <section data-panel="asr" class="active">
+            <h1>Speech → Text</h1>
+            <p class="hint">Record or upload up to 10 minutes. Long recordings are split at pauses. Pick <b>Auto-detect</b> to identify the spoken language first.</p>
+            <div class="row">
+                <label>Language <select id="asrLang" data-langs="auto"></select></label>
+            </div>
+            <div class="audio-input" id="asrAudio"></div>
+            <div class="row"><button id="asrRun" class="primary">Transcribe</button></div>
+            <label class="block">Transcript (you can edit before saving)
+                <textarea id="asrText" rows="6"></textarea>
+            </label>
+            <div id="asrMeta" class="meta"></div>
+            <div class="row">
+                <input id="asrTitle" placeholder="Title (optional), e.g. SHG meeting 14 Oct">
+                <label class="check"><input type="checkbox" id="asrKeepAudio" checked> keep audio</label>
+                <button id="asrSave" class="primary">💾 Save</button>
+                <button id="asrDownload">⬇ .txt</button>
+                <button id="asrCopy">Copy</button>
+            </div>
+        </section>
+
+        <!-- Text -> Speech -->
+        <section data-panel="tts">
+            <h1>Text → Speech</h1>
+            <div class="row">
+                <label>Language <select id="ttsLang" data-langs></select></label>
+                <label>Voice <select id="ttsGender"><option value="female">Female</option><option value="male">Male</option></select></label>
+            </div>
+            <textarea id="ttsText" rows="5">नमस्ते दीदी, आपकी समूह बैठक का विवरण तैयार है।</textarea>
+            <div class="row">
+                <button id="ttsRun" class="primary">🔊 Speak</button>
+                <button id="ttsStop">⏹ Stop</button>
+                <a id="ttsDownload" class="button hidden" download="speech.wav">⬇ Audio</a>
+            </div>
+        </section>
+
+        <!-- Voice translate -->
+        <section data-panel="voice">
+            <h1>Voice translate</h1>
+            <p class="hint">Speech in one language → text and speech in another, in a single Bhashini pipeline call (ASR → NMT → TTS). Max 45 s.</p>
+            <div class="row">
+                <label>Spoken <select id="voiceSrc" data-langs></select></label>
+                <label>Into <select id="voiceTgt" data-langs data-default="en"></select></label>
+                <label class="check"><input type="checkbox" id="voiceSpeak" checked> speak the translation</label>
+            </div>
+            <div class="audio-input" id="voiceAudio"></div>
+            <div class="row"><button id="voiceRun" class="primary">Translate speech</button></div>
+            <div class="out"><div class="label">Heard</div><div id="voiceHeard"></div></div>
+            <div class="out"><div class="label">Translation</div><div id="voiceOut"></div></div>
+            <audio id="voicePlayer" controls class="hidden"></audio>
+        </section>
+
+        <!-- Denoise -->
+        <section data-panel="denoise">
+            <h1>Denoise audio</h1>
+            <p class="hint">Cleans background noise (fans, traffic, crowd) from a field recording before you listen or transcribe. Max 45 s.</p>
+            <div class="audio-input" id="denoiseAudio"></div>
+            <div class="row"><button id="denoiseRun" class="primary">Remove noise</button></div>
+            <div class="out"><div class="label">Cleaned</div><audio id="denoisePlayer" controls></audio></div>
+            <div class="row"><a id="denoiseDownload" class="button hidden" download="denoised.wav">⬇ Cleaned audio</a></div>
+        </section>
+
+        <!-- Translate -->
+        <section data-panel="translate">
+            <h1>Translate</h1>
+            <div class="row">
+                <label>From <select id="trSrc" data-langs data-default="en"></select></label>
+                <button id="trSwap" title="Swap languages">⇄</button>
+                <label>To <select id="trTgt" data-langs></select></label>
+            </div>
+            <textarea id="trIn" rows="4">Your loan instalment of 500 rupees is due on Friday.</textarea>
+            <div class="row"><button id="trRun" class="primary">Translate</button><button id="trSpeak">🔊 Speak result</button></div>
+            <div class="out"><div id="trOut"></div></div>
+        </section>
+
+        <!-- Transliterate -->
+        <section data-panel="xlit">
+            <h1>Transliterate</h1>
+            <p class="hint">Same words, different script, e.g. a name typed in English letters → Devanagari. Helps users who type Hindi on an English keyboard.</p>
+            <div class="row">
+                <label>From <select id="xlSrc" data-langs data-default="en"></select></label>
+                <label>To <select id="xlTgt" data-langs></select></label>
+            </div>
+            <input id="xlIn" value="mera naam sunita devi hai" class="wide">
+            <div class="row"><button id="xlRun" class="primary">Transliterate sentence</button><button id="xlWord">Suggestions for last word</button></div>
+            <div class="out"><div id="xlOut"></div></div>
+            <div id="xlSuggest" class="chips"></div>
+        </section>
+
+        <!-- Detect language -->
+        <section data-panel="detect">
+            <h1>Detect language</h1>
+            <h2>From text</h2>
+            <input id="tldIn" value="ನಮಸ್ಕಾರ, ನಿಮ್ಮ ಹೆಸರು ಏನು?" class="wide">
+            <div class="row"><button id="tldRun" class="primary">Detect</button></div>
+            <div class="out"><div id="tldOut"></div></div>
+            <h2>From speech</h2>
+            <div class="audio-input" id="aldAudio"></div>
+            <div class="row"><button id="aldRun" class="primary">Detect spoken language</button></div>
+            <div class="out"><div id="aldOut"></div></div>
+        </section>
+
+        <!-- NER -->
+        <section data-panel="ner">
+            <h1>Names &amp; places</h1>
+            <p class="hint">Finds people, places and organisations in Indic-language text (English isn't supported by this model). Useful for pulling member names out of meeting notes.</p>
+            <div class="row"><label>Language <select id="nerLang" data-langs data-exclude="en"></select></label></div>
+            <textarea id="nerIn" rows="3">सुनीता देवी और रीना कुमारी ने पटना में जीविका समूह की बैठक में भाग लिया।</textarea>
+            <div class="row"><button id="nerRun" class="primary">Find entities</button></div>
+            <div class="out"><div id="nerOut"></div></div>
+        </section>
+
+        <!-- OCR -->
+        <section data-panel="ocr">
+            <h1>Read image (OCR)</h1>
+            <p class="hint">Printed text from a photo of a register, passbook or notice (PNG/JPEG). Can take 5–15 s.</p>
+            <div class="row">
+                <label>Language <select id="ocrLang" data-langs></select></label>
+                <label class="file">📷 Choose image <input type="file" id="ocrFile" accept="image/png,image/jpeg"></label>
+            </div>
+            <input id="ocrUrl" class="wide" placeholder="…or a public https:// image URL">
+            <img id="ocrPreview" class="preview hidden" alt="Selected image">
+            <div class="row"><button id="ocrRun" class="primary">Read text</button><button id="ocrToTr">Send to Translate</button></div>
+            <div class="out"><div id="ocrOut"></div></div>
+        </section>
+
+        <!-- Saved -->
+        <section data-panel="saved">
+            <h1>Saved transcripts</h1>
+            <p class="hint">Stored on the server in <code>data/transcripts/</code> (a Docker volume). Live-streamed transcripts saved from the socket example appear here too.</p>
+            <div class="row"><button id="savedRefresh">↻ Refresh</button></div>
+            <div id="savedList"></div>
+        </section>
+
+        <!-- Settings -->
+        <section data-panel="settings">
+            <h1>Settings</h1>
+            <p class="hint" id="settingsHint">Saved to <code id="confPath">config/bhashini.conf</code> on the server and used by both containers immediately. The key is never sent back to the browser in full.</p>
+            <form id="settingsForm">
+                <label class="block">Bhashini (Dhruva) API key
+                    <input type="password" name="BHASHINI_API_KEY" id="keyInput" autocomplete="off" placeholder="leave empty to keep the current key">
+                </label>
+                <label class="block">Default TTS voice
+                    <select name="BHASHINI_TTS_GENDER"><option>female</option><option>male</option></select>
+                </label>
+                <details>
+                    <summary>Service IDs (advanced, leave empty to let Dhruva choose)</summary>
+                    <div id="serviceFields"></div>
+                </details>
+                <div class="row">
+                    <button type="submit" class="primary">Save settings</button>
+                    <button type="button" id="testKey">Test key</button>
+                    <button type="button" id="forgetCode" class="hidden">Forget access code</button>
+                </div>
+            </form>
+        </section>
+    </main>
+</div>
+
+<div id="accessGate" class="gate hidden" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+    <form id="accessForm" class="gate-box">
+        <h1 id="gateTitle">Access code</h1>
+        <p class="hint">This deployment is private. Enter the access code you were given.</p>
+        <input id="accessInput" type="password" autocomplete="current-password" class="wide" required>
+        <p id="accessError" class="error-text"></p>
+        <div class="row"><button type="submit" class="primary">Continue</button></div>
+    </form>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

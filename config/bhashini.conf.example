@@ -1,0 +1,29 @@
+# Copy to config/bhashini.conf, or just open the Settings page: it writes this file.
+# Never commit bhashini.conf: it holds the API key.
+
+# Dhruva inference key (sent as the raw Authorization header value).
+BHASHINI_API_KEY=
+
+# Optional. Empty lets Dhruva pick a model by language.
+BHASHINI_ASR_SERVICE_ID=
+BHASHINI_NMT_SERVICE_ID=
+BHASHINI_TTS_SERVICE_ID=
+BHASHINI_TTS_GENDER=female
+# Per-language overrides, e.g.:
+# BHASHINI_ASR_SERVICE_ID_HI=
+# BHASHINI_TTS_SERVICE_ID_TA=
+
+# Defaults that were verified against the production Dhruva API.
+BHASHINI_XLIT_SERVICE_ID=ai4bharat/indicxlit--cpu-fsv2
+BHASHINI_TLD_SERVICE_ID=
+BHASHINI_ALD_SERVICE_ID=bhashini/iitmandi/audio-lang-detection/gpu
+BHASHINI_NER_SERVICE_ID=bhashini/ai4bharat/indic-ner
+BHASHINI_OCR_SERVICE_ID=
+BHASHINI_DENOISER_SERVICE_ID=bhashini/facebook/denoiser--gpu-t4
+
+# Live ASR (stream_app.py)
+BHASHINI_STREAM_URL=wss://dhruva-api.bhashini.gov.in
+BHASHINI_STREAM_ASR_SERVICE_ID=
+
+# Comma-separated origins allowed to call the HTTP service from another origin (restart to apply).
+ALLOWED_ORIGINS=
