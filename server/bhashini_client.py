@@ -47,7 +47,8 @@ def env(name, default=None):
 def _key():
     key = env('BHASHINI_API_KEY')
     if not key:
-        raise BhashiniError('not_configured', 'BHASHINI_API_KEY is not set. Add it on the Settings page.', 503)
+        where = 'as an environment variable on the host' if config.HOSTED else 'on the Settings page'
+        raise BhashiniError('not_configured', f'BHASHINI_API_KEY is not set. Add it {where}.', 503)
     return key
 
 
